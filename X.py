@@ -15,7 +15,6 @@ ADMIN_USER_IDS = [int(uid) for uid in os.getenv('ADMIN_USER_IDS', '').split(',')
 HOSTNAME = os.getenv('HOSTNAME', 'darknode')
 WATERMARK = os.getenv('WATERMARK', 'DarkNode')
 DOCKER_IMAGE = os.getenv('DOCKER_IMAGE', 'ubuntu:22.04')
-# Note: The DATA_DIR is now a blank string, so files are saved to the bot's root folder.
 DATA_DIR = os.getenv('DATA_DIR', '')
 
 # --- File Paths ---
@@ -71,7 +70,20 @@ def get_tmate_session(container):
         return None
 
 # --- Docker & Data Management ---
-docker_client = docker.from_env()
+# The fixed code to handle Docker connection errors
+try:
+    docker_client = docker.from_env()
+    docker_client.ping()
+except Exception as e:
+    print(f"Failed to connect using environment variables: {e}")
+    print("Attempting to connect to the default Unix socket...")
+    try:
+        docker_client = docker.DockerClient(base_url='unix://var/run/docker.sock')
+        docker_client.ping()
+    except Exception as e:
+        print(f"Failed to connect to Docker. Please ensure it's running and you have permissions. Error: {e}")
+        exit(1)
+
 
 async def create_vps(ram_mb: int, cpu_cores: int, disk_gb: int, container_name: str, user_id: int):
     """Deploys an Ubuntu container with tmate and records the session."""
@@ -92,7 +104,7 @@ async def create_vps(ram_mb: int, cpu_cores: int, disk_gb: int, container_name: 
         print(f"Container '{container_name}' started.")
 
         exec_id = container.exec_run(install_tmate_script(container_name))
-        await asyncio.sleep(10)  # Wait for tmate to install
+        await asyncio.sleep(10)
         
         tmate_link = get_tmate_session(container)
         
@@ -165,7 +177,6 @@ class DeployModal(ui.Modal, title='Deploy a New VPS'):
         container, tmate_link = await create_vps(ram, cpu, disk, container_name, user_id)
         
         if container:
-            # Send the tmate link via DM
             user = await client.fetch_user(user_id)
             try:
                 dm_embed = get_embed("✅ VPS Deployed!", 
@@ -175,7 +186,7 @@ class DeployModal(ui.Modal, title='Deploy a New VPS'):
                 )
                 await user.send(embed=dm_embed)
             except HTTPException:
-                pass # Can't DM user, continue without sending
+                pass
             
             await interaction.followup.send(
                 embed=get_embed("✅ VPS Deployed Successfully!", 
